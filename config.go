@@ -2,6 +2,8 @@ package steadyrabbit
 
 import (
 	"errors"
+
+	"github.com/streadway/amqp"
 )
 
 // QueueConfig -> queue info
@@ -39,6 +41,7 @@ type ConsumerConfig struct {
 	AutoAck          bool
 	ConsumerTag      string
 	QosPrefetchCount int
+	QosPrefetchSize  int
 	Bindings         []BindingConfig
 }
 
@@ -46,6 +49,9 @@ type ConsumerConfig struct {
 type PublisherConfig struct {
 	Exchange            *ExchangeConfig
 	PublishConfirmation bool
+	DeliveryMode        uint8
+	Mandatory           bool
+	Immediate           bool
 }
 
 // Config steadyrabbit configuration
@@ -77,16 +83,29 @@ func ValidatePublisherConfig(cnf *Config) error {
 		cnf.RetryReconnectIntervalSec = DefaultRetryReconnectIntervalSec
 	}
 
-	if cnf.Publisher != nil && cnf.Publisher.Exchange != nil {
+	if cnf.Publisher == nil {
+		cnf.Publisher = &PublisherConfig{
+			DeliveryMode:        amqp.Persistent,
+			PublishConfirmation: DefaultPublisherConfirm,
+			Immediate:           DefaultIsImmediatePublish,
+			Mandatory:           DefaultIsMandatoryPublish,
+		}
+
+	}
+
+	if cnf.Publisher.Exchange != nil {
 		if cnf.Publisher.Exchange.ExchangeDeclare {
 			if cnf.Publisher.Exchange.ExchangeType == "" {
 				return errors.New("ExchangeType cannot be empty if ExchangeDeclare set to true")
 			}
+			if cnf.Publisher.Exchange.ExchangeName == "" {
+				return errors.New("ExchangeName cannot be empty")
+			}
 		}
+	}
 
-		if cnf.Publisher.Exchange.ExchangeName == "" {
-			return errors.New("ExchangeName cannot be empty")
-		}
+	if cnf.Publisher != nil {
+
 	}
 
 	return nil
