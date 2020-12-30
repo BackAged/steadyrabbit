@@ -2,8 +2,6 @@ package steadyrabbit
 
 import (
 	"errors"
-
-	"github.com/streadway/amqp"
 )
 
 // QueueConfig -> queue info
@@ -85,7 +83,7 @@ func ValidatePublisherConfig(cnf *Config) error {
 
 	if cnf.Publisher == nil {
 		cnf.Publisher = &PublisherConfig{
-			DeliveryMode:        amqp.Persistent,
+			DeliveryMode:        DefaultDeliveryMode,
 			PublishConfirmation: DefaultPublisherConfirm,
 			Immediate:           DefaultIsImmediatePublish,
 			Mandatory:           DefaultIsMandatoryPublish,
@@ -93,19 +91,17 @@ func ValidatePublisherConfig(cnf *Config) error {
 
 	}
 
-	if cnf.Publisher.Exchange != nil {
-		if cnf.Publisher.Exchange.ExchangeDeclare {
-			if cnf.Publisher.Exchange.ExchangeType == "" {
-				return errors.New("ExchangeType cannot be empty if ExchangeDeclare set to true")
-			}
-			if cnf.Publisher.Exchange.ExchangeName == "" {
-				return errors.New("ExchangeName cannot be empty")
-			}
-		}
+	if cnf.Publisher.Exchange == nil {
+		cnf.Publisher.Exchange = &ExchangeConfig{}
 	}
 
-	if cnf.Publisher != nil {
-
+	if cnf.Publisher.Exchange.ExchangeDeclare {
+		if cnf.Publisher.Exchange.ExchangeType == "" {
+			return errors.New("ExchangeType cannot be empty if ExchangeDeclare set to true")
+		}
+		if cnf.Publisher.Exchange.ExchangeName == "" {
+			return errors.New("ExchangeName cannot be empty if ExchangeDeclare set to true")
+		}
 	}
 
 	return nil
