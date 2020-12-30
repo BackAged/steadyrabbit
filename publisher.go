@@ -32,18 +32,15 @@ func NewPublisher(cnf *Config) (*Publisher, error) {
 		return nil, errors.Wrap(err, "invalid config")
 	}
 
-	p := &Publisher{
-		Config: cnf,
-	}
-
-	conn, err := p.connect()
+	conn, err := connect(cnf)
 	if err != nil {
 		return nil, err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
 
-	p = &Publisher{
+	p := &Publisher{
+		Config:           cnf,
 		Conn:             conn,
 		NotifyCloseChan:  make(chan *amqp.Error),
 		PublisherRWMutex: &sync.RWMutex{},
@@ -51,6 +48,7 @@ func NewPublisher(cnf *Config) (*Publisher, error) {
 		cancel:           cancel,
 		log:              logrus.WithField("pkg", "rabbit"),
 	}
+
 	if p.Config.Publisher.PublishConfirmation {
 		p.NotifyPublishChan = make(chan amqp.Confirmation, 100)
 	}
@@ -107,10 +105,6 @@ func WithPriority(priority uint8) PublishingOption {
 func (p *Publisher) Publish(ctx context.Context, routingKey string, body []byte, opts ...PublishingOption) error {
 	if p.closed {
 		return ErrConnectionClosed
-	}
-
-	if ctx == nil {
-		ctx = context.Background()
 	}
 
 	p.PublisherRWMutex.RLock()
@@ -171,7 +165,7 @@ func (p *Publisher) watchNotifyClose() {
 		for {
 			attempts++
 
-			conn, err = p.connect()
+			conn, err = connect(p.Config)
 			if err != nil {
 				p.log.Warningf("unable to complete reconnect: %s; retrying in %d sec", err, p.Config.RetryReconnectIntervalSec)
 				time.Sleep(time.Duration(p.Config.RetryReconnectIntervalSec) * time.Second)
@@ -210,22 +204,23 @@ func (p *Publisher) watchNotifyClose() {
 	}
 }
 
-func (p *Publisher) connect() (*amqp.Connection, error) {
+// connect tries to establish a connection with rabbitmq server
+func connect(cnf *Config) (*amqp.Connection, error) {
 	var (
 		conn *amqp.Connection
 		err  error
 	)
 
-	if p.Config.UseTLS {
+	if cnf.UseTLS {
 		tlsConfig := &tls.Config{}
 
-		if p.Config.SkipVerifyTLS {
+		if cnf.SkipVerifyTLS {
 			tlsConfig.InsecureSkipVerify = true
 		}
 
-		conn, err = amqp.DialTLS(p.Config.URL, tlsConfig)
+		conn, err = amqp.DialTLS(cnf.URL, tlsConfig)
 	} else {
-		conn, err = amqp.Dial(p.Config.URL)
+		conn, err = amqp.Dial(cnf.URL)
 	}
 	if err != nil {
 		return nil, errors.Wrap(err, "unable to dial server")
