@@ -13,8 +13,8 @@ import (
 var _ = Describe("Publisher", func() {
 	var (
 		cnf *steadyrabbit.Config
-		// p   *steadyrabbit.Publisher
-		// err error
+		p   *steadyrabbit.Publisher
+		err error
 	)
 
 	JustBeforeEach(func() {
@@ -149,8 +149,9 @@ var _ = Describe("Publisher", func() {
 	})
 
 	Describe("Publish", func() {
-		Context("with alive connection", func() {
+		Context("with good connection", func() {
 			It("should success", func() {
+				cnf := formPublisherConfig()
 				p, err := steadyrabbit.NewPublisher(cnf)
 
 				Expect(err).ToNot(HaveOccurred())
@@ -177,6 +178,29 @@ var _ = Describe("Publisher", func() {
 				Expect(err).ToNot(HaveOccurred())
 				Expect(p).ToNot(BeNil())
 			})
+
+			Context("Performance Benchmark: ", func() {
+				cnf = formPublisherConfig()
+				p, err = steadyrabbit.NewPublisher(cnf)
+
+				Expect(err).ToNot(HaveOccurred())
+				Expect(p).ToNot(BeNil())
+
+				Measure("it should be able to publish 5000 message per sec", func(b Benchmarker) {
+					runtime := b.Time("runtime", func() {
+						for i := 0; i < 5000; i++ {
+							err = p.Publish(context.Background(), "shahin", []byte("shahin"))
+							Expect(err).ToNot(HaveOccurred())
+						}
+					})
+
+					Expect(runtime.Seconds()).Should(BeNumerically("<", 1), "5000 message publish shouldn't take too long.")
+					//b.RecordValue("disk usage (in MB)", HowMuchDiskSpaceDidYouUse())
+					time.Sleep(1 * time.Second)
+				}, 10)
+
+			})
+
 		})
 	})
 
