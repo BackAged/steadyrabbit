@@ -56,7 +56,7 @@ var _ = Describe("Publisher", func() {
 				p, err := steadyrabbit.NewPublisher(nil)
 
 				Expect(err).ToNot(BeNil())
-				Expect(err.Error()).To(ContainSubstring("Config cannot be nil"))
+				Expect(err.Error()).To(ContainSubstring("Config can not be nil"))
 				Expect(p).To(BeNil())
 			})
 
@@ -112,7 +112,10 @@ var _ = Describe("Publisher", func() {
 				}
 
 				// Give our watcher a moment to see the msg and cause a reconnect
-				time.Sleep(100 * time.Millisecond)
+				err = p.Publish(context.Background(), "shahin", []byte("shahin"))
+				Expect(err).ToNot(HaveOccurred())
+
+				//time.Sleep(1 * time.Second)
 
 				// We should've reconnected and got a new conn
 				Expect(p.Conn).ToNot(BeNil())
@@ -201,6 +204,26 @@ var _ = Describe("Publisher", func() {
 
 			})
 
+		})
+		Context("with unreliable connection", func() {
+			It("should reconnect & publish", func() {
+				cnf := formPublisherConfig()
+				p, err := steadyrabbit.NewPublisher(cnf)
+
+				Expect(err).ToNot(HaveOccurred())
+				Expect(p).ToNot(BeNil())
+
+				// Write an error to the NotifyCloseChan
+				p.NotifyCloseChan <- &amqp.Error{
+					Code:    0,
+					Reason:  "Test failure",
+					Server:  false,
+					Recover: false,
+				}
+
+				err = p.Publish(context.Background(), "shahin", []byte("shahin"))
+				Expect(err).ToNot(HaveOccurred())
+			})
 		})
 	})
 

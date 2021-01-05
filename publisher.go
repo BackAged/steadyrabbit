@@ -107,7 +107,12 @@ func (p *Publisher) Publish(ctx context.Context, routingKey string, body []byte,
 		return ErrConnectionClosed
 	}
 
-	p.PublisherRWMutex.RLock()
+	select {
+	case p.PublisherRWMutex.RLock():
+	case <-ctx.Done():
+		return errors.New("publish deadline exceeded")
+	}
+
 	defer p.PublisherRWMutex.RUnlock()
 
 	ap := amqp.Publishing{
@@ -189,7 +194,6 @@ func (p *Publisher) watchNotifyClose() {
 			logrus.Errorf("unable to set new channel: %s", err)
 			panic(fmt.Sprintf("unable to set new channel: %s", err))
 		}
-
 		p.PublisherChannel = publisherChannel
 
 		if p.Config.Publisher.PublishConfirmation {

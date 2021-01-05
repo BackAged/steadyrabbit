@@ -34,7 +34,7 @@ var _ = Describe("Config", func() {
 
 				err := steadyrabbit.ValidatePublisherConfig(cnf)
 				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("URL cannot be empty"))
+				Expect(err.Error()).To(ContainSubstring("URL can not be empty"))
 			})
 
 			It("only requires ExchangeType, ExchangeName Exchange Declare is true", func() {
@@ -45,7 +45,7 @@ var _ = Describe("Config", func() {
 				}
 				err := steadyrabbit.ValidatePublisherConfig(cnf)
 				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("ExchangeType cannot be empty if ExchangeDeclare set to true"))
+				Expect(err.Error()).To(ContainSubstring("ExchangeType can not be empty if ExchangeDeclare set to true"))
 
 				cnf.Publisher = &steadyrabbit.PublisherConfig{
 					Exchange: &steadyrabbit.ExchangeConfig{
@@ -55,7 +55,7 @@ var _ = Describe("Config", func() {
 				}
 				err = steadyrabbit.ValidatePublisherConfig(cnf)
 				Expect(err).To(HaveOccurred())
-				Expect(err.Error()).To(ContainSubstring("ExchangeName cannot be empty if ExchangeDeclare set to true"))
+				Expect(err.Error()).To(ContainSubstring("ExchangeName can not be empty if ExchangeDeclare set to true"))
 
 				cnf.Publisher = &steadyrabbit.PublisherConfig{
 					Exchange: &steadyrabbit.ExchangeConfig{
