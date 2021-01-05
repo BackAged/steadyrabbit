@@ -107,12 +107,8 @@ func (p *Publisher) Publish(ctx context.Context, routingKey string, body []byte,
 		return ErrConnectionClosed
 	}
 
-	select {
-	case p.PublisherRWMutex.RLock():
-	case <-ctx.Done():
-		return errors.New("publish deadline exceeded")
-	}
-
+	// TODO-> timed locking later
+	p.PublisherRWMutex.RLock()
 	defer p.PublisherRWMutex.RUnlock()
 
 	ap := amqp.Publishing{
