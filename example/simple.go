@@ -1,11 +1,3 @@
-# steadyrabbit
-
-steadyrabbit is a library for  working with rabbitmq
-
-
-## Usage
-
-```
 package main
 
 import (
@@ -50,8 +42,3 @@ func main() {
 	})
 
 }
-```
-
-
-## License
-None
