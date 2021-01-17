@@ -1,11 +1,3 @@
-# steadyrabbit
-
-steadyrabbit is a library for  working with rabbitmq
-
-
-## Usage
-
-```
 package main
 
 import (
@@ -17,26 +9,45 @@ import (
 )
 
 func main() {
+	topic := "shahin"
+	exchangeName := "some.exchange"
+	exchangeType := amqp.ExchangeTopic
+
 	p, err := steadyrabbit.NewPublisher(&steadyrabbit.Config{
 		URL: "amqp://localhost",
+		Publisher: &steadyrabbit.PublisherConfig{
+			Exchange: &steadyrabbit.ExchangeConfig{
+				ExchangeName:    exchangeName,
+				ExchangeType:    exchangeType,
+				ExchangeDeclare: true,
+			},
+		},
 	})
 	if err != nil {
 		log.Fatalf("unable to instantiate publisher: %s", err)
 	}
 
-	queueName := "shahin"
-
-	if err = p.Publish(context.Background(), queueName, []byte("shahin")); err != nil {
-		log.Fatalf("unable to publish message: %s", err)
+	if err = p.Publish(context.Background(), topic, []byte("shahin")); err != nil {
+		log.Fatalf("unable to instantiate publisher: %s", err)
 	}
 
 	c, err := steadyrabbit.NewConsumer(&steadyrabbit.Config{
 		URL: "amqp://localhost",
 		Consumer: &steadyrabbit.ConsumerConfig{
 			QueueConfig: &steadyrabbit.QueueConfig{
-				QueueName:    queueName,
+				QueueName:    "some.queue",
 				QueueDeclare: true,
 				QueueDurable: true,
+			},
+			Bindings: []*steadyrabbit.BindingConfig{
+				&steadyrabbit.BindingConfig{
+					Exchange: &steadyrabbit.ExchangeConfig{
+						ExchangeName:    exchangeName,
+						ExchangeDeclare: true,
+						ExchangeType:    exchangeType,
+					},
+					RoutingKeys: []string{topic},
+				},
 			},
 		},
 	})
@@ -48,10 +59,4 @@ func main() {
 		log.Println("got message: ", msg)
 		return msg.Ack(false)
 	})
-
 }
-```
-
-
-## License
-None

@@ -95,23 +95,6 @@ func (c *Consumer) configureChannelForConsume() error {
 	return nil
 }
 
-func (c *Consumer) newDeliveryStream() (<-chan amqp.Delivery, error) {
-	deliveryStream, err := c.session.GetChannel().Consume(
-		c.Config.Consumer.QueueConfig.QueueName,
-		c.Config.Consumer.ConsumerTag,
-		c.Config.Consumer.AutoAck,
-		c.Config.Consumer.QueueConfig.QueueExclusive,
-		false,
-		false,
-		nil,
-	)
-	if err != nil {
-		return nil, err
-	}
-
-	return deliveryStream, nil
-}
-
 // GetNotifyCloseChannel returns notify close channel
 func (c *Consumer) GetNotifyCloseChannel() chan *amqp.Error {
 	return c.session.GetNotifyCloseChannel()
