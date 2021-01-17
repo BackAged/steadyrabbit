@@ -21,23 +21,24 @@ const (
 	ConsumerSessionType  SessionType = "Consumer"
 )
 
-// session hold a rabbitmq connection and channel
-type session struct {
+// Session hold a rabbitmq connection and channel
+type Session struct {
 	connection              *amqp.Connection
 	channel                 *amqp.Channel
 	consumerDeliveryChannel <-chan amqp.Delivery
-	notifyCloseChan         chan *amqp.Error
+	NotifyCloseChan         chan *amqp.Error
 	sessionRWMutex          *sync.RWMutex
 	config                  *Config
 	sessionType             SessionType
 	log                     *logrus.Entry
 }
 
-func newSession(cnf *Config, sessionType SessionType) (*session, error) {
-	s := &session{
+// NewSession instantiates and return a session
+func NewSession(cnf *Config, sessionType SessionType) (*Session, error) {
+	s := &Session{
 		sessionType:     sessionType,
 		config:          cnf,
-		notifyCloseChan: make(chan *amqp.Error),
+		NotifyCloseChan: make(chan *amqp.Error),
 		sessionRWMutex:  &sync.RWMutex{},
 		log:             logrus.WithField("pkg", "steadyrabbit"),
 	}
@@ -56,7 +57,7 @@ func newSession(cnf *Config, sessionType SessionType) (*session, error) {
 		}
 	}
 
-	s.connection.NotifyClose(s.notifyCloseChan)
+	s.connection.NotifyClose(s.NotifyCloseChan)
 
 	go s.watchNotifyClose()
 
@@ -64,12 +65,12 @@ func newSession(cnf *Config, sessionType SessionType) (*session, error) {
 }
 
 // GetChannel returns the channel
-func (s *session) GetChannel() *amqp.Channel {
+func (s *Session) GetChannel() *amqp.Channel {
 	s.sessionRWMutex.RLock()
 	defer s.sessionRWMutex.RUnlock()
 
 	if s.channel == nil {
-		s.log.Debug("this shouldn't happen unless a bug")
+		s.log.Info("this shouldn't happen unless a bug")
 		panic("unable to get channel")
 	}
 
@@ -77,21 +78,29 @@ func (s *session) GetChannel() *amqp.Channel {
 }
 
 // GetDeliveryChannel returns consumer delivery channel
-func (s *session) GetDeliveryChannel() <-chan amqp.Delivery {
+func (s *Session) GetDeliveryChannel() <-chan amqp.Delivery {
 	s.sessionRWMutex.RLock()
 	defer s.sessionRWMutex.RUnlock()
 
 	if s.channel == nil {
-		s.log.Debug("this shouldn't happen unless a bug")
+		s.log.Info("this shouldn't happen unless a bug")
 		panic("unable to get channel")
 	}
 
 	return s.consumerDeliveryChannel
 }
 
+// GetNotifyCloseChannel  returns notify close channel
+func (s *Session) GetNotifyCloseChannel() chan *amqp.Error {
+	s.sessionRWMutex.RLock()
+	defer s.sessionRWMutex.RUnlock()
+
+	return s.NotifyCloseChan
+}
+
 // Close tears the connection down
 // with channels and  delivery channels too
-func (s *session) Close() error {
+func (s *Session) Close() error {
 	if s.connection == nil {
 		return nil
 	}
@@ -104,7 +113,7 @@ func (s *session) Close() error {
 }
 
 // connect connects to rabbit server
-func (s *session) connect() error {
+func (s *Session) connect() error {
 	var (
 		conn *amqp.Connection
 		err  error
@@ -133,7 +142,7 @@ func (s *session) connect() error {
 }
 
 // newChannel establish a new channel on a rabbitmq connection
-func (s *session) newChannel() error {
+func (s *Session) newChannel() error {
 	if s.connection == nil {
 		return errors.New("can not create channel without active connection")
 	}
@@ -149,10 +158,10 @@ func (s *session) newChannel() error {
 }
 
 // newDeliveryChannel sets up a consumer delivery channel
-func (s *session) newDeliveryChannel() error {
+func (s *Session) newDeliveryChannel() error {
 	qCnf := s.config.Consumer.QueueConfig
 	if qCnf.QueueDeclare {
-		if _, err := s.GetChannel().QueueDeclare(
+		if _, err := s.channel.QueueDeclare(
 			qCnf.QueueName,
 			qCnf.QueueDurable,
 			qCnf.QueueAutoDelete,
@@ -164,7 +173,7 @@ func (s *session) newDeliveryChannel() error {
 		}
 	}
 
-	dlvrChnl, err := s.GetChannel().Consume(
+	dlvrChnl, err := s.channel.Consume(
 		s.config.Consumer.QueueConfig.QueueName,
 		s.config.Consumer.ConsumerTag,
 		s.config.Consumer.AutoAck,
@@ -182,14 +191,16 @@ func (s *session) newDeliveryChannel() error {
 	return nil
 }
 
-func (s *session) watchNotifyClose() {
+func (s *Session) watchNotifyClose() {
 	for {
-		errClose := <-s.notifyCloseChan
-		s.log.Debugf("received message on notify close channel: '%+v' (reconnecting)", errClose)
+		errClose := <-s.NotifyCloseChan
+		s.log.Infof("received message on notify close channel: '%+v' (reconnecting)", errClose)
 
 		// Acquire mutex for reconnecting and prevent
 		// access to the channel
 		s.sessionRWMutex.Lock()
+
+		s.Close()
 
 		var (
 			attempts int
@@ -204,29 +215,30 @@ func (s *session) watchNotifyClose() {
 				continue
 			}
 
-			s.log.Debugf("successfully reconnected after %d attempts", attempts)
+			s.log.Infof("successfully reconnected after %d attempts", attempts)
 			break
 		}
 
-		// Create and set a new notify close channel (since old one gets shutdown)
-		s.notifyCloseChan = make(chan *amqp.Error, 0)
-		s.connection.NotifyClose(s.notifyCloseChan)
-
 		if err := s.newChannel(); err != nil {
-			logrus.Errorf("unable to set new channel: %s", err)
+			fmt.Printf("unable to set new channel: %s", err)
 			panic(fmt.Sprintf("unable to set new channel: %s", err))
 		}
-
+		fmt.Println("here")
 		if s.sessionType == ConsumerSessionType {
 			if err := s.newDeliveryChannel(); err != nil {
-				logrus.Errorf("unable to set new delivery channel: %s", err)
+				fmt.Printf("unable to set new delivery channel: %s", err)
 				panic(fmt.Sprintf("unable to set new delivery channel: %s", err))
 			}
 		}
+		fmt.Println("here2")
+
+		// Create and set a new notify close channel (since old one gets shutdown)
+		s.NotifyCloseChan = make(chan *amqp.Error)
+		s.connection.NotifyClose(s.NotifyCloseChan)
 
 		// Unlock so that channel is usable again
 		s.sessionRWMutex.Unlock()
 
-		s.log.Debug("watchNotifyClose has completed successfully")
+		s.log.Info("watchNotifyClose has completed successfully")
 	}
 }

@@ -11,7 +11,7 @@ import (
 // Publisher defines rabbitmq publisher
 type Publisher struct {
 	Config            *Config
-	session           *session
+	session           *Session
 	NotifyPublishChan chan amqp.Confirmation
 	closed            bool
 	log               *logrus.Entry
@@ -23,7 +23,7 @@ func NewPublisher(cnf *Config) (*Publisher, error) {
 		return nil, errors.Wrap(err, "invalid config")
 	}
 
-	ssn, err := newSession(cnf, PublisherSessionType)
+	ssn, err := NewSession(cnf, PublisherSessionType)
 	if err != nil {
 		return nil, err
 	}
@@ -114,6 +114,11 @@ func (p *Publisher) Close() error {
 	}
 
 	return nil
+}
+
+// GetNotifyCloseChannel returns notify close channel
+func (p *Publisher) GetNotifyCloseChannel() chan *amqp.Error {
+	return p.session.GetNotifyCloseChannel()
 }
 
 func (p *Publisher) watchNotifyPublish() {

@@ -2,6 +2,8 @@ package steadyrabbit
 
 import (
 	"context"
+	"fmt"
+	"reflect"
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -11,7 +13,7 @@ import (
 // Consumer defines consumer
 type Consumer struct {
 	Config  *Config
-	session *session
+	session *Session
 	ctx     context.Context
 	cancel  func()
 	log     *logrus.Entry
@@ -23,7 +25,7 @@ func NewConsumer(cnf *Config) (*Consumer, error) {
 		return nil, errors.Wrap(err, "invalid config")
 	}
 
-	ssn, err := newSession(cnf, ConsumerSessionType)
+	ssn, err := NewSession(cnf, ConsumerSessionType)
 	if err != nil {
 		return nil, err
 	}
@@ -110,6 +112,11 @@ func (c *Consumer) newDeliveryStream() (<-chan amqp.Delivery, error) {
 	return deliveryStream, nil
 }
 
+// GetNotifyCloseChannel returns notify close channel
+func (c *Consumer) GetNotifyCloseChannel() chan *amqp.Error {
+	return c.session.GetNotifyCloseChannel()
+}
+
 // Close closes the connection
 func (c *Consumer) Close() error {
 	c.cancel()
@@ -136,6 +143,10 @@ func (c *Consumer) Consume(ctx context.Context, f ConsumerFunc) error {
 	for {
 		select {
 		case msg := <-c.session.GetDeliveryChannel():
+			if reflect.DeepEqual(msg, amqp.Delivery{}) {
+				fmt.Println("closed delivery channel")
+				continue
+			}
 			if err := f(msg); err != nil {
 				c.log.Debugf("error during consume: %s", err)
 			}
