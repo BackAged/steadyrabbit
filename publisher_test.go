@@ -71,64 +71,6 @@ var _ = Describe("Publisher", func() {
 				Expect(r).To(BeNil())
 			})
 
-			It("should instantiates various internals", func() {
-				cnf := formPublisherConfig()
-
-				p, err := steadyrabbit.NewPublisher(cnf)
-
-				Expect(err).To(BeNil())
-				Expect(p).ToNot(BeNil())
-
-				Expect(p.Conn).ToNot(BeNil())
-				Expect(p.NotifyCloseChan).ToNot(BeNil())
-				Expect(p.PublisherRWMutex).ToNot(BeNil())
-				Expect(p.Config).ToNot(BeNil())
-
-				if p.Config.Publisher.PublishConfirmation {
-					Expect(p.PublisherChannel).ToNot(BeNil())
-				}
-			})
-
-			It("should start NotifyCloseChan watcher", func() {
-				cnf := formPublisherConfig()
-
-				p, err := steadyrabbit.NewPublisher(cnf)
-
-				Expect(err).To(BeNil())
-				Expect(p).ToNot(BeNil())
-
-				// Before we write errors to the notify channel, copy previous
-				// conn and channels so we can compare them after reconnect
-				oldConn := p.Conn
-				oldNotifyCloseChan := p.NotifyCloseChan
-				oldPublisherChan := p.PublisherChannel
-
-				// Write an error to the NotifyCloseChan
-				p.NotifyCloseChan <- &amqp.Error{
-					Code:    0,
-					Reason:  "Test failure",
-					Server:  false,
-					Recover: false,
-				}
-
-				// Give our watcher a moment to see the msg and cause a reconnect
-				err = p.Publish(context.Background(), "shahin", []byte("shahin"))
-				Expect(err).ToNot(HaveOccurred())
-
-				//time.Sleep(1 * time.Second)
-
-				// We should've reconnected and got a new conn
-				Expect(p.Conn).ToNot(BeNil())
-				Expect(oldConn).ToNot(Equal(p.Conn))
-
-				// We should also get new channels
-				Expect(p.NotifyCloseChan).ToNot(BeNil())
-				Expect(oldNotifyCloseChan).ToNot(Equal(p.NotifyCloseChan))
-
-				Expect(p.PublisherChannel).ToNot(BeNil())
-				Expect(oldPublisherChan).ToNot(Equal(p.PublisherChannel))
-			})
-
 			It("should start PublisherChannel watcher if publisher confirm is on", func() {
 				cnf := formPublisherConfig()
 				cnf.Publisher = &steadyrabbit.PublisherConfig{
@@ -182,28 +124,6 @@ var _ = Describe("Publisher", func() {
 				Expect(p).ToNot(BeNil())
 			})
 
-			Context("Performance Benchmark: ", func() {
-				cnf = formPublisherConfig()
-				p, err = steadyrabbit.NewPublisher(cnf)
-
-				Expect(err).ToNot(HaveOccurred())
-				Expect(p).ToNot(BeNil())
-
-				Measure("it should be able to publish 5000 message per sec", func(b Benchmarker) {
-					runtime := b.Time("runtime", func() {
-						for i := 0; i < 5000; i++ {
-							err = p.Publish(context.Background(), "shahin", []byte("shahin"))
-							Expect(err).ToNot(HaveOccurred())
-						}
-					})
-
-					Expect(runtime.Seconds()).Should(BeNumerically("<", 1), "5000 message publish shouldn't take too long.")
-					//b.RecordValue("disk usage (in MB)", HowMuchDiskSpaceDidYouUse())
-					time.Sleep(1 * time.Second)
-				}, 10)
-
-			})
-
 		})
 		Context("with unreliable connection", func() {
 			It("should reconnect & publish", func() {
@@ -214,7 +134,7 @@ var _ = Describe("Publisher", func() {
 				Expect(p).ToNot(BeNil())
 
 				// Write an error to the NotifyCloseChan
-				p.NotifyCloseChan <- &amqp.Error{
+				p.GetNotifyCloseChannel() <- &amqp.Error{
 					Code:    0,
 					Reason:  "Test failure",
 					Server:  false,
@@ -243,4 +163,28 @@ var _ = Describe("Publisher", func() {
 			})
 		})
 	})
+
+	Describe("Performance", func() {
+		Context("Performance Benchmark: ", func() {
+			cnf = formPublisherConfig()
+			p, err = steadyrabbit.NewPublisher(cnf)
+
+			Expect(err).ToNot(HaveOccurred())
+			Expect(p).ToNot(BeNil())
+
+			Measure("it should be able to publish 5000 message per sec", func(b Benchmarker) {
+				runtime := b.Time("runtime", func() {
+					for i := 0; i < 5000; i++ {
+						err = p.Publish(context.Background(), "shahin", []byte("shahin"))
+						Expect(err).ToNot(HaveOccurred())
+					}
+				})
+
+				Expect(runtime.Seconds()).Should(BeNumerically("<", 1), "5000 message publish shouldn't take too long.")
+				//b.RecordValue("disk usage (in MB)", HowMuchDiskSpaceDidYouUse())
+				time.Sleep(1 * time.Second)
+			}, 10)
+		})
+	})
+
 })

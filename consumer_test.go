@@ -66,56 +66,6 @@ var _ = Describe("Consumer", func() {
 				Expect(err.Error()).To(ContainSubstring("unable to dial server"))
 				Expect(c).To(BeNil())
 			})
-
-			It("should instantiates various internals", func() {
-				c, err := steadyrabbit.NewConsumer(cnf)
-
-				Expect(err).To(BeNil())
-				Expect(c).ToNot(BeNil())
-
-				Expect(c.Conn).ToNot(BeNil())
-				Expect(c.NotifyCloseChan).ToNot(BeNil())
-				Expect(c.DeliveryStream).ToNot(BeNil())
-				Expect(c.ConsumerChannel).ToNot(BeNil())
-			})
-
-			It("should start NotifyCloseChan watcher", func() {
-				c, err := steadyrabbit.NewConsumer(cnf)
-
-				Expect(err).To(BeNil())
-				Expect(c).ToNot(BeNil())
-
-				// Before we write errors to the notify channel, copy previous
-				// conn and channels so we can compare them after reconnect
-				oldConn := c.Conn
-				oldNotifyCloseChan := c.NotifyCloseChan
-				oldConsumerChan := c.ConsumerChannel
-				oldDeliveryStream := c.DeliveryStream
-
-				// Write an error to the NotifyCloseChan
-				c.NotifyCloseChan <- &amqp.Error{
-					Code:    0,
-					Reason:  "Test failure",
-					Server:  false,
-					Recover: false,
-				}
-
-				time.Sleep(1 * time.Second)
-
-				// We should've reconnected and got a new conn
-				Expect(c.Conn).ToNot(BeNil())
-				Expect(oldConn).ToNot(Equal(c.Conn))
-
-				// We should also get new channels
-				Expect(c.NotifyCloseChan).ToNot(BeNil())
-				Expect(oldNotifyCloseChan).ToNot(Equal(c.NotifyCloseChan))
-
-				Expect(c.ConsumerChannel).ToNot(BeNil())
-				Expect(oldConsumerChan).ToNot(Equal(c.ConsumerChannel))
-
-				Expect(c.DeliveryStream).ToNot(BeNil())
-				Expect(oldDeliveryStream).ToNot(Equal(c.DeliveryStream))
-			})
 		})
 	})
 
@@ -295,7 +245,7 @@ var _ = Describe("Consumer", func() {
 				}()
 
 				// // Write an error to the NotifyCloseChan
-				c.NotifyCloseChan <- &amqp.Error{
+				c.GetNotifyCloseChannel() <- &amqp.Error{
 					Code:    0,
 					Reason:  "Test failure",
 					Server:  false,
@@ -381,11 +331,9 @@ var _ = Describe("Consumer", func() {
 					}
 				})
 
-				Expect(runtime.Seconds()).Should(BeNumerically("<", 1), "5000 message publish shouldn't take too long.")
+				Expect(runtime.Seconds()).Should(BeNumerically("<", 5), "5000 message consume shouldn't take too long.")
 				//b.RecordValue("disk usage (in MB)", HowMuchDiskSpaceDidYouUse())
 			}, 1)
-
 		})
-
 	})
 })

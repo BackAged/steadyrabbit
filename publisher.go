@@ -2,10 +2,6 @@ package steadyrabbit
 
 import (
 	"context"
-	"crypto/tls"
-	"fmt"
-	"sync"
-	"time"
 
 	"github.com/pkg/errors"
 	"github.com/sirupsen/logrus"
@@ -15,14 +11,9 @@ import (
 // Publisher defines rabbitmq publisher
 type Publisher struct {
 	Config            *Config
-	Conn              *amqp.Connection
-	NotifyCloseChan   chan *amqp.Error
+	session           *Session
 	NotifyPublishChan chan amqp.Confirmation
-	PublisherChannel  *amqp.Channel
-	PublisherRWMutex  *sync.RWMutex
 	closed            bool
-	ctx               context.Context
-	cancel            func()
 	log               *logrus.Entry
 }
 
@@ -32,40 +23,28 @@ func NewPublisher(cnf *Config) (*Publisher, error) {
 		return nil, errors.Wrap(err, "invalid config")
 	}
 
-	conn, err := connect(cnf)
+	ssn, err := NewSession(cnf, PublisherSessionType)
 	if err != nil {
 		return nil, err
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
 	p := &Publisher{
-		Config:           cnf,
-		Conn:             conn,
-		NotifyCloseChan:  make(chan *amqp.Error),
-		PublisherRWMutex: &sync.RWMutex{},
-		ctx:              ctx,
-		cancel:           cancel,
-		log:              logrus.WithField("pkg", "rabbit"),
+		Config:  cnf,
+		session: ssn,
+		log:     logrus.WithField("pkg", "steadyrabbit"),
 	}
 
 	if p.Config.Publisher.PublishConfirmation {
 		p.NotifyPublishChan = make(chan amqp.Confirmation, 100)
 	}
 
-	ch, err := p.newChannel()
-	if err != nil {
+	if p.Config.Publisher.PublishConfirmation {
+		p.session.GetChannel().NotifyPublish(p.NotifyPublishChan)
+	}
+
+	if p.configureChannelForPublish(); err != nil {
 		return nil, err
 	}
-	p.PublisherChannel = ch
-
-	if p.Config.Publisher.PublishConfirmation {
-		p.PublisherChannel.NotifyPublish(p.NotifyPublishChan)
-	}
-	conn.NotifyClose(p.NotifyCloseChan)
-
-	// Launch connection watcher/reconnect
-	go p.watchNotifyClose()
 
 	return p, nil
 }
@@ -107,10 +86,6 @@ func (p *Publisher) Publish(ctx context.Context, routingKey string, body []byte,
 		return ErrConnectionClosed
 	}
 
-	// TODO-> timed locking later
-	p.PublisherRWMutex.RLock()
-	defer p.PublisherRWMutex.RUnlock()
-
 	ap := amqp.Publishing{
 		DeliveryMode: DefaultDeliveryMode,
 		Body:         body,
@@ -121,7 +96,7 @@ func (p *Publisher) Publish(ctx context.Context, routingKey string, body []byte,
 		opt(&ap)
 	}
 
-	if err := p.PublisherChannel.Publish(
+	if err := p.session.GetChannel().Publish(
 		p.Config.Publisher.Exchange.ExchangeName, routingKey,
 		DefaultIsMandatoryPublish, DefaultIsImmediatePublish, ap); err != nil {
 		return err
@@ -132,15 +107,18 @@ func (p *Publisher) Publish(ctx context.Context, routingKey string, body []byte,
 
 // Close closes thee connection
 func (p *Publisher) Close() error {
-	p.cancel()
-
-	if err := p.Conn.Close(); err != nil {
-		return fmt.Errorf("unable to close amqp connection: %s", err)
-	}
-
 	p.closed = true
 
+	if err := p.session.Close(); err != nil {
+		return err
+	}
+
 	return nil
+}
+
+// GetNotifyCloseChannel returns notify close channel
+func (p *Publisher) GetNotifyCloseChannel() chan *amqp.Error {
+	return p.session.GetNotifyCloseChannel()
 }
 
 func (p *Publisher) watchNotifyPublish() {
@@ -149,95 +127,8 @@ func (p *Publisher) watchNotifyPublish() {
 	}
 }
 
-func (p *Publisher) watchNotifyClose() {
-	for {
-		errClose := <-p.NotifyCloseChan
-		p.log.Debugf("received message on notify close channel: '%+v' (reconnecting)", errClose)
-
-		// Acquire mutex to pause all publisher in the time of reconnecting AND prevent
-		// access to the channel map
-		p.PublisherRWMutex.Lock()
-
-		var (
-			attempts int
-			conn     *amqp.Connection
-			err      error
-		)
-		for {
-			attempts++
-
-			conn, err = connect(p.Config)
-			if err != nil {
-				p.log.Warningf("unable to complete reconnect: %s; retrying in %d sec", err, p.Config.RetryReconnectIntervalSec)
-				time.Sleep(time.Duration(p.Config.RetryReconnectIntervalSec) * time.Second)
-				continue
-			}
-
-			p.log.Debugf("successfully reconnected after %d attempts", attempts)
-			break
-		}
-
-		// setting connection
-		p.Conn = conn
-
-		// Create and set a new notify close channel (since old one gets shutdown)
-		p.NotifyCloseChan = make(chan *amqp.Error, 0)
-		p.Conn.NotifyClose(p.NotifyCloseChan)
-
-		// Update channel
-		publisherChannel, err := p.newChannel()
-		if err != nil {
-			logrus.Errorf("unable to set new channel: %s", err)
-			panic(fmt.Sprintf("unable to set new channel: %s", err))
-		}
-		p.PublisherChannel = publisherChannel
-
-		if p.Config.Publisher.PublishConfirmation {
-			p.NotifyPublishChan = make(chan amqp.Confirmation, 100)
-			p.PublisherChannel.NotifyPublish(p.NotifyPublishChan)
-		}
-
-		// Unlock so that producers can begin publishing messages from this new channel
-		p.PublisherRWMutex.Unlock()
-
-		p.log.Debug("watchNotifyClose has completed successfully")
-	}
-}
-
-// connect tries to establish a connection with rabbitmq server
-func connect(cnf *Config) (*amqp.Connection, error) {
-	var (
-		conn *amqp.Connection
-		err  error
-	)
-
-	if cnf.UseTLS {
-		tlsConfig := &tls.Config{}
-
-		if cnf.SkipVerifyTLS {
-			tlsConfig.InsecureSkipVerify = true
-		}
-
-		conn, err = amqp.DialTLS(cnf.URL, tlsConfig)
-	} else {
-		conn, err = amqp.Dial(cnf.URL)
-	}
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to dial server")
-	}
-
-	return conn, nil
-}
-
-func (p *Publisher) newChannel() (*amqp.Channel, error) {
-	if p.Conn == nil {
-		return nil, errors.New("r.Conn is nil - did this get instantiated correctly? bug?")
-	}
-
-	ch, err := p.Conn.Channel()
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to instantiate channel")
-	}
+func (p *Publisher) configureChannelForPublish() error {
+	ch := p.session.GetChannel()
 
 	if p.Config.Publisher.Exchange.ExchangeDeclare {
 		if err := ch.ExchangeDeclare(
@@ -249,15 +140,15 @@ func (p *Publisher) newChannel() (*amqp.Channel, error) {
 			false,
 			nil,
 		); err != nil {
-			return nil, errors.Wrap(err, "unable to declare exchange")
+			return errors.Wrap(err, "unable to declare exchange")
 		}
 	}
 
 	if p.Config.Publisher.PublishConfirmation {
-		if err = ch.Confirm(false); err != nil {
-			return nil, errors.Wrap(err, "unable to instantiate channel")
+		if err := ch.Confirm(false); err != nil {
+			return errors.Wrap(err, "unable to instantiate channel")
 		}
 	}
 
-	return ch, nil
+	return nil
 }
