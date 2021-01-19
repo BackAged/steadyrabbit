@@ -81,13 +81,6 @@ var _ = Describe("Publisher", func() {
 
 				Expect(err).To(BeNil())
 				Expect(p).ToNot(BeNil())
-				Expect(p.NotifyPublishChan).ToNot(BeNil())
-
-				// Write an confirmation to the NotifyChan
-				p.NotifyPublishChan <- amqp.Confirmation{
-					Ack:         true,
-					DeliveryTag: 1,
-				}
 			})
 
 		})
