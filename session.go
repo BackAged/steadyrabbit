@@ -27,6 +27,7 @@ type Session struct {
 	channel                 *amqp.Channel
 	consumerDeliveryChannel <-chan amqp.Delivery
 	NotifyCloseChan         chan *amqp.Error
+	NotifyPublishChan       chan amqp.Confirmation
 	sessionRWMutex          *sync.RWMutex
 	config                  *Config
 	sessionType             SessionType
@@ -54,6 +55,13 @@ func NewSession(cnf *Config, sessionType SessionType) (*Session, error) {
 	if s.sessionType == ConsumerSessionType {
 		if err := s.newDeliveryChannel(); err != nil {
 			return nil, err
+		}
+	}
+
+	if s.sessionType == PublisherSessionType {
+		if s.config.Publisher.PublishConfirmation {
+			s.NotifyPublishChan = make(chan amqp.Confirmation, 100)
+			s.channel.NotifyPublish(s.NotifyPublishChan)
 		}
 	}
 
@@ -96,6 +104,14 @@ func (s *Session) GetNotifyCloseChannel() chan *amqp.Error {
 	defer s.sessionRWMutex.RUnlock()
 
 	return s.NotifyCloseChan
+}
+
+// GetNotifyPublishChannel  returns notify publish channel
+func (s *Session) GetNotifyPublishChannel() chan amqp.Confirmation {
+	s.sessionRWMutex.RLock()
+	defer s.sessionRWMutex.RUnlock()
+
+	return s.NotifyPublishChan
 }
 
 // Close tears the connection down
@@ -235,6 +251,13 @@ func (s *Session) watchNotifyClose() {
 		// Create and set a new notify close channel (since old one gets shutdown)
 		s.NotifyCloseChan = make(chan *amqp.Error)
 		s.connection.NotifyClose(s.NotifyCloseChan)
+
+		if s.sessionType == PublisherSessionType {
+			if s.config.Publisher.PublishConfirmation {
+				s.NotifyPublishChan = make(chan amqp.Confirmation, 100)
+				s.channel.NotifyPublish(s.NotifyPublishChan)
+			}
+		}
 
 		// Unlock so that channel is usable again
 		s.sessionRWMutex.Unlock()

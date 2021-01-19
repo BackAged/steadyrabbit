@@ -10,11 +10,10 @@ import (
 
 // Publisher defines rabbitmq publisher
 type Publisher struct {
-	Config            *Config
-	session           *Session
-	NotifyPublishChan chan amqp.Confirmation
-	closed            bool
-	log               *logrus.Entry
+	Config  *Config
+	session *Session
+	closed  bool
+	log     *logrus.Entry
 }
 
 // NewPublisher instantiate and return a publisher
@@ -34,16 +33,12 @@ func NewPublisher(cnf *Config) (*Publisher, error) {
 		log:     logrus.WithField("pkg", "steadyrabbit"),
 	}
 
-	if p.Config.Publisher.PublishConfirmation {
-		p.NotifyPublishChan = make(chan amqp.Confirmation, 100)
-	}
-
-	if p.Config.Publisher.PublishConfirmation {
-		p.session.GetChannel().NotifyPublish(p.NotifyPublishChan)
-	}
-
 	if p.configureChannelForPublish(); err != nil {
 		return nil, err
+	}
+
+	if p.Config.Publisher.PublishConfirmation {
+		go p.watchNotifyPublish()
 	}
 
 	return p, nil
@@ -122,16 +117,14 @@ func (p *Publisher) GetNotifyCloseChannel() chan *amqp.Error {
 }
 
 func (p *Publisher) watchNotifyPublish() {
-	for cnfrm := range p.NotifyPublishChan {
-		p.log.Debugf("server confirmation received  +%v\n", cnfrm)
+	for cnfrm := range p.session.GetNotifyPublishChannel() {
+		p.log.Printf("server confirmation received  +%v\n", cnfrm.DeliveryTag)
 	}
 }
 
 func (p *Publisher) configureChannelForPublish() error {
-	ch := p.session.GetChannel()
-
 	if p.Config.Publisher.Exchange.ExchangeDeclare {
-		if err := ch.ExchangeDeclare(
+		if err := p.session.GetChannel().ExchangeDeclare(
 			p.Config.Publisher.Exchange.ExchangeName,
 			p.Config.Publisher.Exchange.ExchangeType,
 			p.Config.Publisher.Exchange.ExchangeDurable,
@@ -145,10 +138,9 @@ func (p *Publisher) configureChannelForPublish() error {
 	}
 
 	if p.Config.Publisher.PublishConfirmation {
-		if err := ch.Confirm(false); err != nil {
-			return errors.Wrap(err, "unable to instantiate channel")
+		if err := p.session.GetChannel().Confirm(false); err != nil {
+			return errors.Wrap(err, "unable to instantiate publisher confirmation")
 		}
 	}
-
 	return nil
 }
